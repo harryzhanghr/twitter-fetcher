@@ -1,0 +1,18 @@
+.env
+.envrc
+*.pem
+*.key
+.DS_Store
+
+# Binary
+twitter-fetcher
+
+# Node
+frontend/node_modules/
+frontend/.next/
+
+# Data exports
+*.csv
+
+# Claude
+.claude/
