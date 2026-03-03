@@ -2,7 +2,9 @@ import { getDb } from "@/lib/db";
 import Feed from "@/components/Feed";
 import type { Tweet, EngagementSnapshot } from "@/lib/types";
 
-// Re-render at most every 60 seconds (ISR)
+// Render dynamically on each request (no static prerender at build time).
+// Caches via ISR — revalidates at most every 60 seconds at runtime.
+export const dynamic = "force-dynamic";
 export const revalidate = 60;
 
 async function getTweets(): Promise<Tweet[]> {
