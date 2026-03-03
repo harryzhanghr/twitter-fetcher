@@ -1,13 +1,10 @@
+import { unstable_noStore as noStore } from "next/cache";
 import { getDb } from "@/lib/db";
 import Feed from "@/components/Feed";
 import type { Tweet, EngagementSnapshot } from "@/lib/types";
 
-// Render dynamically on each request (no static prerender at build time).
-// Caches via ISR — revalidates at most every 60 seconds at runtime.
-export const dynamic = "force-dynamic";
-export const revalidate = 60;
-
 async function getTweets(): Promise<Tweet[]> {
+  noStore(); // Opt out of static generation — fetch fresh data at runtime.
   const sql = getDb();
   const rows = await sql<Tweet[]>`
     SELECT
