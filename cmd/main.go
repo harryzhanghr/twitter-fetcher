@@ -34,10 +34,10 @@ func main() {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
 	}
 
-	// 2. Load refresh token from macOS Keychain (public client — no client secret needed).
-	refreshToken, err := config.LoadKeychain("harry-twitter-bot.x.refresh_token")
+	// 2. Load refresh token (from file or macOS Keychain, based on TOKEN_STORE).
+	refreshToken, err := config.LoadRefreshToken(cfg)
 	if err != nil {
-		log.Fatal().Err(err).Msg("failed to load X_REFRESH_TOKEN from Keychain")
+		log.Fatal().Err(err).Msg("failed to load refresh token")
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -51,12 +51,12 @@ func main() {
 	defer pool.Close()
 	log.Info().Msg("database connected")
 
-	// 4. Build OAuth2 token provider with Keychain rotation callback.
+	// 4. Build OAuth2 token provider with token rotation callback.
 	tokenProvider := twitter.NewOAuth2TokenProvider(cfg.XClientID, refreshToken, func(newToken string) {
-		if err := config.WriteKeychain("harry-twitter-bot.x.refresh_token", newToken); err != nil {
-			log.Error().Err(err).Msg("failed to rotate refresh token in Keychain")
+		if err := config.WriteRefreshToken(cfg, newToken); err != nil {
+			log.Error().Err(err).Msg("failed to rotate refresh token")
 		} else {
-			log.Info().Msg("refresh token rotated in Keychain")
+			log.Info().Str("store", cfg.TokenStore).Msg("refresh token rotated")
 		}
 	})
 

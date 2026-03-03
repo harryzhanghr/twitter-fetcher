@@ -49,10 +49,8 @@ function formatAbsolute(iso: string): string {
       year: "numeric",
       hour: "numeric",
       minute: "2-digit",
-      timeZone: "Asia/Hong_Kong",
       timeZoneName: "short",
-    })
-    .replace(/GMT\+8/, "HKT");
+    });
 }
 
 // useEffect so timezone resolves on the client (server runs UTC, client has local tz)

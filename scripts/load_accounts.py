@@ -2,20 +2,43 @@
 """
 Reads usernames from a CSV, looks up their Twitter user IDs in batches,
 and inserts them into the twitter_accounts table.
-Safely rotates the refresh token in Keychain after each use.
+Safely rotates the refresh token after each use.
+
+Usage:
+    python3 scripts/load_accounts.py <csv_path> [--replace]
 """
 import csv
 import os
 import subprocess
 import sys
 import time
+from pathlib import Path
+
 import requests
 import psycopg2
 
 TOKEN_URL   = "https://api.x.com/2/oauth2/token"
 USERS_URL   = "https://api.x.com/2/users/by"
-KEYCHAIN_SVC = "harry-twitter-bot.x.refresh_token"
 BATCH_SIZE  = 100
+
+# Defaults — overridden by .env values if present.
+TOKEN_STORE = "file"
+KEYCHAIN_SVC = "twitter-fetcher.refresh_token"
+REFRESH_TOKEN_FILE = ".refresh_token"
+
+
+def read_env():
+    """Read key=value pairs from .env file at project root."""
+    env_path = Path(__file__).parent.parent / ".env"
+    values = {}
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, val = line.split("=", 1)
+            values[key.strip()] = val.strip()
+    return values
 
 
 def keychain_read(service):
@@ -35,8 +58,36 @@ def keychain_write(service, value):
         sys.exit(f"Keychain write failed for {service}: {r.stderr.strip()}")
 
 
-def get_access_token(client_id):
-    refresh_token = keychain_read(KEYCHAIN_SVC)
+def read_refresh_token(env):
+    token_store = env.get("TOKEN_STORE", TOKEN_STORE)
+    if token_store == "keychain":
+        return keychain_read(env.get("KEYCHAIN_SERVICE", KEYCHAIN_SVC))
+    # File mode.
+    token_file = Path(__file__).parent.parent / env.get("REFRESH_TOKEN_FILE", REFRESH_TOKEN_FILE)
+    if token_file.exists():
+        token = token_file.read_text().strip()
+        if token:
+            return token
+    # Fall back to env var.
+    token = os.environ.get("X_REFRESH_TOKEN", "")
+    if token:
+        return token
+    sys.exit("No refresh token found. Run scripts/oauth_setup.py first.")
+
+
+def write_refresh_token(env, token):
+    token_store = env.get("TOKEN_STORE", TOKEN_STORE)
+    if token_store == "keychain":
+        keychain_write(env.get("KEYCHAIN_SERVICE", KEYCHAIN_SVC), token)
+    else:
+        token_file = Path(__file__).parent.parent / env.get("REFRESH_TOKEN_FILE", REFRESH_TOKEN_FILE)
+        fd = os.open(str(token_file), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(token + "\n")
+
+
+def get_access_token(client_id, env):
+    refresh_token = read_refresh_token(env)
     resp = requests.post(TOKEN_URL,
         data={"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": client_id},
         headers={"Content-Type": "application/x-www-form-urlencoded"}, timeout=30)
@@ -45,8 +96,8 @@ def get_access_token(client_id):
     payload = resp.json()
     new_refresh = payload.get("refresh_token")
     if new_refresh:
-        keychain_write(KEYCHAIN_SVC, new_refresh)
-        print(f"  Refresh token rotated in Keychain")
+        write_refresh_token(env, new_refresh)
+        print(f"  Refresh token rotated")
     return payload["access_token"]
 
 
@@ -79,23 +130,28 @@ def lookup_batch(usernames, access_token):
 
 
 def main():
-    csv_path = sys.argv[1] if len(sys.argv) > 1 else \
-        "/Users/harryz/Documents/GitHub/harry-twitter-bot/TwitterAccount_with_follow_counts_filtered.csv"
-    db_url = None
-    env_path = "/Users/harryz/Documents/GitHub/twitter-fetcher/.env"
-    with open(env_path) as f:
-        for line in f:
-            if line.startswith("X_CLIENT_ID="):
-                client_id = line.split("=", 1)[1].strip()
-            if line.startswith("DATABASE_URL="):
-                db_url = line.split("=", 1)[1].strip()
+    # Require CSV path as argument.
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    if not args:
+        print("Usage: python3 scripts/load_accounts.py <csv_path> [--replace]")
+        print("  csv_path: CSV file with usernames in column index 1")
+        sys.exit(1)
+    csv_path = args[0]
+
+    env = read_env()
+    client_id = env.get("X_CLIENT_ID")
+    db_url = env.get("DATABASE_URL")
+    if not client_id:
+        sys.exit("X_CLIENT_ID not found in .env")
+    if not db_url:
+        sys.exit("DATABASE_URL not found in .env")
 
     print(f"Reading usernames from {csv_path}...")
     usernames = read_usernames(csv_path)
     print(f"Found {len(usernames)} usernames")
 
     print("Getting access token...")
-    access_token = get_access_token(client_id)
+    access_token = get_access_token(client_id, env)
     print(f"  Access token obtained")
 
     print(f"Looking up user IDs in batches of {BATCH_SIZE}...")

@@ -7,6 +7,9 @@
 # Binary
 twitter-fetcher
 
+# Token storage
+.refresh_token
+
 # Node
 frontend/node_modules/
 frontend/.next/

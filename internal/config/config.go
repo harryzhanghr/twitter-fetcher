@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -11,16 +12,21 @@ import (
 )
 
 type Config struct {
-	XClientID            string `envconfig:"X_CLIENT_ID" required:"true"`
-	DatabaseURL          string `envconfig:"DATABASE_URL" required:"true"`
-	PollIntervalSeconds  int    `envconfig:"POLL_INTERVAL_SECONDS" default:"300"`
-	MaxResultsPerFetch   int    `envconfig:"MAX_RESULTS_PER_FETCH" default:"100"`
+	XClientID              string `envconfig:"X_CLIENT_ID" required:"true"`
+	DatabaseURL            string `envconfig:"DATABASE_URL" required:"true"`
+	PollIntervalSeconds    int    `envconfig:"POLL_INTERVAL_SECONDS" default:"300"`
+	MaxResultsPerFetch     int    `envconfig:"MAX_RESULTS_PER_FETCH" default:"100"`
 	InitialLookbackMinutes int    `envconfig:"INITIAL_LOOKBACK_MINUTES" default:"5"`
 	LogLevel               string   `envconfig:"LOG_LEVEL" default:"info"`
 	LogJSON                bool     `envconfig:"LOG_JSON" default:"true"`
 	SnapshotDelays         []string `envconfig:"SNAPSHOT_DELAYS" default:"15m,30m,45m,60m"`
 	SnapshotCheckInterval  int      `envconfig:"SNAPSHOT_CHECK_INTERVAL_SECONDS" default:"60"`
 	SnapshotBatchSize      int      `envconfig:"SNAPSHOT_BATCH_SIZE" default:"100"`
+
+	// Token storage: "file" (default, portable) or "keychain" (macOS only).
+	TokenStore       string `envconfig:"TOKEN_STORE" default:"file"`
+	KeychainService  string `envconfig:"KEYCHAIN_SERVICE" default:"twitter-fetcher.refresh_token"`
+	RefreshTokenFile string `envconfig:"REFRESH_TOKEN_FILE" default:".refresh_token"`
 }
 
 // SnapshotDelay maps a human-readable label to a parsed duration.
@@ -48,6 +54,69 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
 	return &cfg, nil
+}
+
+// LoadRefreshToken reads the refresh token based on TOKEN_STORE config.
+// For "file" mode: reads from RefreshTokenFile, falling back to X_REFRESH_TOKEN env var.
+// For "keychain" mode: reads from macOS Keychain using KeychainService.
+func LoadRefreshToken(cfg *Config) (string, error) {
+	switch cfg.TokenStore {
+	case "keychain":
+		return LoadKeychain(cfg.KeychainService)
+	case "file":
+		data, err := os.ReadFile(cfg.RefreshTokenFile)
+		if err == nil {
+			token := strings.TrimSpace(string(data))
+			if token != "" {
+				return token, nil
+			}
+		}
+		// Fall back to env var for initial bootstrap.
+		if token := os.Getenv("X_REFRESH_TOKEN"); token != "" {
+			return token, nil
+		}
+		return "", fmt.Errorf("no refresh token found: set X_REFRESH_TOKEN env var or run scripts/oauth_setup.py")
+	default:
+		return "", fmt.Errorf("unknown TOKEN_STORE %q: use \"file\" or \"keychain\"", cfg.TokenStore)
+	}
+}
+
+// WriteRefreshToken persists a rotated refresh token based on TOKEN_STORE config.
+// For "file" mode: writes atomically (temp file + rename) with 0600 permissions.
+// For "keychain" mode: updates macOS Keychain.
+func WriteRefreshToken(cfg *Config, token string) error {
+	switch cfg.TokenStore {
+	case "keychain":
+		return WriteKeychain(cfg.KeychainService, token)
+	case "file":
+		dir := filepath.Dir(cfg.RefreshTokenFile)
+		tmp, err := os.CreateTemp(dir, ".refresh_token_tmp_*")
+		if err != nil {
+			return fmt.Errorf("create temp file: %w", err)
+		}
+		tmpName := tmp.Name()
+		if _, err := tmp.WriteString(token + "\n"); err != nil {
+			tmp.Close()
+			os.Remove(tmpName)
+			return fmt.Errorf("write temp file: %w", err)
+		}
+		if err := tmp.Chmod(0600); err != nil {
+			tmp.Close()
+			os.Remove(tmpName)
+			return fmt.Errorf("chmod temp file: %w", err)
+		}
+		if err := tmp.Close(); err != nil {
+			os.Remove(tmpName)
+			return fmt.Errorf("close temp file: %w", err)
+		}
+		if err := os.Rename(tmpName, cfg.RefreshTokenFile); err != nil {
+			os.Remove(tmpName)
+			return fmt.Errorf("rename temp file: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown TOKEN_STORE %q", cfg.TokenStore)
+	}
 }
 
 // LoadKeychain retrieves a secret from macOS Keychain for the current user.
