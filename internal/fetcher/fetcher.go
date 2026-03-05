@@ -41,10 +41,10 @@ func New(cfg *config.Config, queries *db.Queries, client *twitter.Client, delays
 
 // Run executes a poll cycle immediately on startup, then on every tick.
 func (f *Fetcher) Run(ctx context.Context) {
-	f.runCycle(ctx)
-
 	ticker := time.NewTicker(time.Duration(f.cfg.PollIntervalSeconds) * time.Second)
 	defer ticker.Stop()
+
+	f.runCycle(ctx)
 
 	for {
 		select {
