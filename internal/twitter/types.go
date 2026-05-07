@@ -10,6 +10,14 @@ type PublicMetrics struct {
 	BookmarkCount   int `json:"bookmark_count"`
 }
 
+// UserPublicMetrics holds public account-level metrics.
+type UserPublicMetrics struct {
+	FollowersCount int `json:"followers_count"`
+	FollowingCount int `json:"following_count"`
+	TweetCount     int `json:"tweet_count"`
+	ListedCount    int `json:"listed_count"`
+}
+
 // ReferencedTweet is a tweet referenced by another (retweet, quote, reply).
 type ReferencedTweet struct {
 	Type string `json:"type"` // "retweeted", "quoted", "replied_to"
@@ -42,7 +50,7 @@ type MediaVariant struct {
 // Media represents a photo, video, or animated GIF attached to a tweet.
 type Media struct {
 	MediaKey        string         `json:"media_key"`
-	Type            string         `json:"type"` // "photo", "video", "animated_gif"
+	Type            string         `json:"type"`              // "photo", "video", "animated_gif"
 	URL             string         `json:"url"`               // set for photos
 	PreviewImageURL string         `json:"preview_image_url"` // thumbnail for video/gif
 	Variants        []MediaVariant `json:"variants"`          // video encoding options
@@ -63,9 +71,13 @@ type Tweet struct {
 
 // UserInfo represents a Twitter API v2 user object.
 type UserInfo struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`     // display name, e.g. "Elon Musk"
-	Username string `json:"username"` // handle, e.g. "elonmusk"
+	ID            string            `json:"id"`
+	Name          string            `json:"name"`     // display name, e.g. "Elon Musk"
+	Username      string            `json:"username"` // handle, e.g. "elonmusk"
+	Description   string            `json:"description"`
+	Verified      bool              `json:"verified"`
+	VerifiedType  string            `json:"verified_type"`
+	PublicMetrics UserPublicMetrics `json:"public_metrics"`
 }
 
 // Includes holds expanded objects returned alongside tweets.
@@ -101,4 +113,17 @@ type UserTweetsRequest struct {
 // TweetLookupResponse is the top-level response from GET /2/tweets?ids=...
 type TweetLookupResponse struct {
 	Data []Tweet `json:"data"`
+}
+
+// UserFollowingRequest holds parameters for fetching accounts a user follows.
+type UserFollowingRequest struct {
+	UserID          string
+	PaginationToken string
+	MaxResults      int
+}
+
+// UserFollowingResponse is the top-level response from GET /2/users/:id/following.
+type UserFollowingResponse struct {
+	Data []UserInfo `json:"data"`
+	Meta Meta       `json:"meta"`
 }

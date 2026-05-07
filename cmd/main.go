@@ -52,12 +52,13 @@ func main() {
 	log.Info().Msg("database connected")
 
 	// 4. Build OAuth2 token provider with token rotation callback.
-	tokenProvider := twitter.NewOAuth2TokenProvider(cfg.XClientID, refreshToken, func(newToken string) {
+	tokenProvider := twitter.NewOAuth2TokenProvider(cfg.XClientID, refreshToken, func(newToken string) error {
 		if err := config.WriteRefreshToken(cfg, newToken); err != nil {
 			log.Error().Err(err).Msg("failed to rotate refresh token")
-		} else {
-			log.Info().Str("store", cfg.TokenStore).Msg("refresh token rotated")
+			return err
 		}
+		log.Info().Str("store", cfg.TokenStore).Msg("refresh token rotated")
+		return nil
 	})
 
 	// 5. Build Twitter client.

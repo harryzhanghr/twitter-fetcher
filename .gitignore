@@ -6,6 +6,7 @@
 
 # Binary
 twitter-fetcher
+/follow_snapshot
 
 # Token storage
 .refresh_token

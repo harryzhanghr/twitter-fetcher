@@ -23,13 +23,15 @@ type tokenResponse struct {
 	TokenType    string `json:"token_type"`
 }
 
+type refreshTokenRotator func(newRefreshToken string) error
+
 // OAuth2TokenProvider manages OAuth2 bearer tokens with automatic refresh.
 // onRotate is called whenever Twitter returns a new refresh token — use it
 // to persist the rotated token (e.g. write back to Keychain).
 // This targets public clients (PKCE flow) — no client secret required.
 type OAuth2TokenProvider struct {
 	clientID string
-	onRotate func(newRefreshToken string) // called after each rotation; may be nil
+	onRotate refreshTokenRotator // called after each rotation; may be nil
 
 	mu           sync.Mutex
 	refreshToken string
@@ -39,7 +41,7 @@ type OAuth2TokenProvider struct {
 
 // NewOAuth2TokenProvider creates a new provider with the given credentials.
 // onRotate is called with the new refresh token whenever Twitter rotates it.
-func NewOAuth2TokenProvider(clientID, refreshToken string, onRotate func(string)) *OAuth2TokenProvider {
+func NewOAuth2TokenProvider(clientID, refreshToken string, onRotate refreshTokenRotator) *OAuth2TokenProvider {
 	return &OAuth2TokenProvider{
 		clientID:     clientID,
 		refreshToken: refreshToken,
@@ -53,12 +55,11 @@ func (p *OAuth2TokenProvider) GetToken(ctx context.Context) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.accessToken != "" && time.Now().Add(5*time.Minute).Before(p.expiresAt) {
+	if p.accessToken != "" && wallClockNow().Add(5*time.Minute).Before(p.expiresAt) {
 		return p.accessToken, nil
 	}
 	return p.refresh(ctx)
 }
-
 
 func (p *OAuth2TokenProvider) refresh(ctx context.Context) (string, error) {
 	form := url.Values{}
@@ -88,6 +89,9 @@ func (p *OAuth2TokenProvider) refresh(ctx context.Context) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&tr); err != nil {
 		return "", fmt.Errorf("decode token response: %w", err)
 	}
+	if tr.AccessToken == "" {
+		return "", fmt.Errorf("token response missing access_token")
+	}
 
 	// Default to 2 hours if Twitter omits or returns 0 for expires_in,
 	// preventing every goroutine from seeing the token as immediately expired
@@ -96,8 +100,6 @@ func (p *OAuth2TokenProvider) refresh(ctx context.Context) (string, error) {
 	if expiresIn <= 0 {
 		expiresIn = 7200
 	}
-	p.accessToken = tr.AccessToken
-	p.expiresAt = time.Now().Add(time.Duration(expiresIn) * time.Second)
 
 	// Log so we can confirm what Twitter actually returns.
 	fmt.Printf("{\"level\":\"debug\",\"expires_in_from_twitter\":%d,\"effective_expires_in\":%d,\"message\":\"token refreshed\"}\n", tr.ExpiresIn, expiresIn)
@@ -106,9 +108,18 @@ func (p *OAuth2TokenProvider) refresh(ctx context.Context) (string, error) {
 	if tr.RefreshToken != "" {
 		p.refreshToken = tr.RefreshToken
 		if p.onRotate != nil {
-			go p.onRotate(tr.RefreshToken)
+			if err := p.onRotate(tr.RefreshToken); err != nil {
+				return "", fmt.Errorf("persist rotated refresh token: %w", err)
+			}
 		}
 	}
 
+	p.accessToken = tr.AccessToken
+	p.expiresAt = wallClockNow().Add(time.Duration(expiresIn) * time.Second)
+
 	return p.accessToken, nil
+}
+
+func wallClockNow() time.Time {
+	return time.Now().UTC().Round(0)
 }

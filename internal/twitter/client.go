@@ -155,3 +155,55 @@ func (c *Client) GetTweets(ctx context.Context, ids []string) (*TweetLookupRespo
 	}
 	return &result, nil
 }
+
+// GetUserFollowing fetches accounts followed by the given user.
+func (c *Client) GetUserFollowing(ctx context.Context, req UserFollowingRequest) (*UserFollowingResponse, error) {
+	token, err := c.tokenProvider.GetToken(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("get token: %w", err)
+	}
+
+	endpoint := fmt.Sprintf("%s/users/%s/following", baseURL, req.UserID)
+
+	params := url.Values{}
+	params.Set("user.fields", "id,name,username,description,verified,verified_type,public_metrics")
+	if req.MaxResults > 0 {
+		params.Set("max_results", strconv.Itoa(req.MaxResults))
+	}
+	if req.PaginationToken != "" {
+		params.Set("pagination_token", req.PaginationToken)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		endpoint+"?"+params.Encode(), nil)
+	if err != nil {
+		return nil, fmt.Errorf("build request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+token)
+
+	resp, err := c.http.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("do request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusTooManyRequests {
+		var resetAt time.Time
+		if v := resp.Header.Get("x-rate-limit-reset"); v != "" {
+			if ts, err := strconv.ParseInt(v, 10, 64); err == nil {
+				resetAt = time.Unix(ts, 0)
+			}
+		}
+		return nil, RateLimitError{ResetAt: resetAt}
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("unexpected status %d for following of user %s", resp.StatusCode, req.UserID)
+	}
+
+	var result UserFollowingResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &result, nil
+}
