@@ -114,6 +114,9 @@ The X following endpoint is paginated and rate-limited. A full run over ~1k
 accounts can take a long time. The command honors HTTP 429 reset headers and
 waits before continuing.
 
+The command strips embedded NUL bytes from Twitter text fields before inserting
+rows, because PostgreSQL rejects `0x00` in text columns.
+
 ## Monitor A Running Snapshot
 
 From another shell, check the running command:
@@ -203,6 +206,9 @@ console.table(rows);
 await sql.end({ timeout: 5 });
 '
 ```
+
+Do not use `failed` snapshots for final ranking; they can contain partial edges
+from the account that failed. Use `status = 'completed'` for official results.
 
 Specific snapshot id:
 

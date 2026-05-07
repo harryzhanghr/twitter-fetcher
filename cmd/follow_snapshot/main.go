@@ -406,12 +406,12 @@ func insertEdges(ctx context.Context, pool *pgxpool.Pool, snapshotID int64, sour
 			 ON CONFLICT (snapshot_id, source_user_id, followed_user_id) DO NOTHING`,
 			snapshotID,
 			sourceUserID,
-			u.ID,
-			u.Username,
-			u.Name,
-			nullableString(u.Description),
+			cleanString(u.ID),
+			cleanString(u.Username),
+			cleanString(u.Name),
+			nullableString(cleanString(u.Description)),
 			u.Verified,
-			nullableString(u.VerifiedType),
+			nullableString(cleanString(u.VerifiedType)),
 			u.PublicMetrics.FollowersCount,
 			u.PublicMetrics.FollowingCount,
 			u.PublicMetrics.TweetCount,
@@ -569,6 +569,10 @@ func nullableString(s string) interface{} {
 		return nil
 	}
 	return s
+}
+
+func cleanString(s string) string {
+	return strings.ReplaceAll(s, "\x00", "")
 }
 
 func truncate(s string, n int) string {
